@@ -36,33 +36,43 @@ ownership paths and shared people/addresses prove group membership.
 
 ## Setup
 
-This is a project skill living in `.pi/skills/companies-house-diligence/`
-(SKILL.md, the `companies_house_diligence/` package, `Documentation/`,
-`docx-build/`, `requirements.txt`, `pyproject.toml`). Runtime artefacts
-(`.venv`, `.env`, `.ch_cache`, `output/`) live at the **project root**, which is
-also the working directory for every command below.
+This skill is **self-contained**: it ships its own Python package
+(`companies_house_diligence/`), API reference docs (`Documentation/`), and the
+pandoc pipeline (`docx-build/`). Everything below runs from **the skill's own
+directory** (the folder containing this `SKILL.md`), and all runtime artefacts
+(`.venv`, `.env`, `.ch_cache`, `output/`) live there too. The bundled
+`.gitignore` keeps those out of version control.
 
-First-time setup, run from the project root:
+First-time setup, run **from this skill directory**:
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -r .pi/skills/companies-house-diligence/requirements.txt
-.venv/bin/pip install -e .pi/skills/companies-house-diligence   # registers the package
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .            # registers the companies_house_diligence package
 ```
 
 The editable install makes `python -m companies_house_diligence...` importable
-from the project root regardless of where the skill lives. To also produce Word
-`.docx` profiles, install `pandoc` (the profile builds Markdown either way and
-falls back gracefully when pandoc is absent).
+from this directory. To also produce Word `.docx` profiles, install `pandoc`
+(the profile builds Markdown either way and falls back gracefully when pandoc is
+absent). To read scanned group-accounts PDFs, install `poppler-utils` (provides
+`pdftoppm`/`pdftotext`).
+
+All commands in the phases below assume you are in this skill directory, so
+`.venv/bin/python ...` and the `output/` paths resolve as written. Profiles are
+written under `output/` here by default; pass `--out <absolute-path>` if you
+want them somewhere else.
 
 ## Prerequisites
 
-- API key available as `COMPANIES_HOUSE_KEY` (the toolkit also reads `.env` at
-  the project root).
-- Run everything with the project virtualenv, `.venv/bin/python`, from the
-  project root.
-- API reference docs are in this skill's `Documentation/` directory — consult
-  them with the `read-md` skill when you need exact endpoint parameters or
+- API key in the `COMPANIES_HOUSE_KEY` environment variable (recommended):
+  `export COMPANIES_HOUSE_KEY=...`. As a fallback the toolkit reads a `.env`
+  file containing `COMPANIES_HOUSE_KEY=...`, searching upward from the current
+  directory — so a `.env` in this skill directory works when you run from here.
+  Get a free key at https://developer.company-information.service.gov.uk/ .
+- Run everything with the skill virtualenv, `.venv/bin/python`, from this
+  directory.
+- API reference docs are in this skill's `Documentation/` directory — open the
+  relevant Markdown files directly when you need exact endpoint parameters or
   response fields.
 
 The toolkit is the `companies_house_diligence/` package inside this skill:
@@ -306,7 +316,8 @@ This writes `$D/brief.md` and, when pandoc is available, `$D/brief.docx` (via
 the bundled `docx-build/` pipeline; pass `--no-docx` to skip). The profile is
 text-only and embeds no graphic.
 The sections below explain what each phase gathers and how to read it; the
-underlying calls are documented in `Documentation/` (use the `read-md` skill).
+underlying calls are documented in `Documentation/` (open the relevant Markdown
+files directly).
 
 ### Phase 4 — financials (with real figures)
 
