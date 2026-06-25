@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "companies-house-diligence"
+version = "0.1.0"
+description = "Profile a UK company from its website using Companies House data."
+requires-python = ">=3.9"
+
+# Runtime dependencies are pinned in requirements.txt and installed into the
+# project virtualenv; they are intentionally not duplicated here so that an
+# editable install registers the package without re-resolving them.
+
+[tool.setuptools]
+packages = ["companies_house_diligence"]
