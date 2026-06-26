@@ -156,6 +156,96 @@ def _emp_str(v) -> str:
     return f"{round(v):,}"
 
 
+def _lead_assessment(*, band, own_type, status, nw, nw_p, emp, n_charges,
+                     insolv, has_group, triggers, recent_appts, recent_res) -> dict:
+    """A measured lead-qualification view from Companies House signals alone.
+
+    Deliberately conservative and free of hyperbole. Returns
+    ``{'verdict', 'factors'}`` where ``verdict`` is one honest sentence and
+    ``factors`` is a short list of the signals behind it. The caller adds the
+    caveat that Companies House is only one lens (no contact, product-fit or
+    intent data), and the agent refines the wording in the sales-lens pass.
+    """
+    factors: list[str] = []
+    pos = neg = 0
+
+    st = (status or "").lower()
+    if st and st != "active":
+        return {
+            "verdict": f"Not a current fit on these signals: the company's "
+                       f"status is '{status}'.",
+            "factors": [f"Companies House status is '{status}', not active."],
+        }
+
+    # size / budget capacity
+    if has_group or (band and any(w in band for w in ("large", "medium"))):
+        factors.append("Size suggests the budget capacity to fund external "
+                       "work.")
+        pos += 1
+    elif band and any(w in band for w in ("micro", "dormant")):
+        factors.append("Small scale points to limited budget capacity.")
+        neg += 1
+
+    # momentum
+    d = plain.pct_change(nw, nw_p)
+    if d is not None and d >= 10:
+        factors.append(f"Net worth is growing (up about {abs(d):.0f}% "
+                       "year on year).")
+        pos += 1
+    elif d is not None and d <= -15:
+        factors.append(f"Net worth is shrinking (down about {abs(d):.0f}% "
+                       "year on year).")
+        neg += 1
+
+    # decision-making / ownership
+    if own_type.startswith("private"):
+        factors.append("Private-equity ownership means procurement is likely "
+                       "centralised and judged on return on investment.")
+    elif "subsidiary" in own_type:
+        factors.append("As a subsidiary, budget decisions may sit with the "
+                       "parent rather than this entity.")
+    else:
+        factors.append("Owner-managed: decisions likely rest with the directors.")
+
+    # timing triggers (engagement openings)
+    triggers_present = []
+    if recent_appts:
+        triggers_present.append("a recent senior appointment")
+    if recent_res:
+        triggers_present.append("a recent board departure")
+    if triggers.get("recent_incorporations"):
+        triggers_present.append("a newly incorporated group entity")
+    if triggers.get("rebrands"):
+        triggers_present.append("a recent rebrand")
+    if triggers_present:
+        factors.append("Recent change provides a timing hook: "
+                       + ", ".join(triggers_present) + ".")
+        pos += 1
+
+    # risk
+    if insolv:
+        factors.append("Insolvency history on file warrants caution.")
+        neg += 2
+    elif n_charges:
+        factors.append("Outstanding charges indicate borrowing; not a concern "
+                       "in itself, but note any near-term debt maturity.")
+
+    if neg >= 2:
+        verdict = ("Approach with caution on these signals; the risk markers "
+                   "outweigh the positives.")
+    elif pos >= 2 and neg == 0:
+        verdict = ("Appears reasonably well-qualified on these signals and worth "
+                   "prioritising for a closer look.")
+    elif pos >= 1 and pos > neg:
+        verdict = ("A moderate lead on these signals; worth a look if other "
+                   "sources support it.")
+    else:
+        verdict = ("Nothing in the Companies House record strongly distinguishes "
+                   "this company as a lead; prioritise only if other signals "
+                   "support it.")
+    return {"verdict": verdict, "factors": factors}
+
+
 def _figs_table(figs: dict) -> list[str]:
     L = [f"| Measure | Latest ({figs.get('current_date','?')}) | "
          f"Prior ({figs.get('prior_date','?')}) | Change |",
@@ -322,6 +412,28 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
     if ev:
         L.append("Recent filings show " + ", ".join(ev)
                  + " (see Directors and recent changes below).")
+    L.append("")
+
+    # ---- lead assessment (Companies House signals only) -----------------
+    la = _lead_assessment(
+        band=band, own_type=own["type"],
+        status=anchor_attrs.get("status"), nw=nw, nw_p=nw_p, emp=emp,
+        n_charges=n_charges, insolv=insolv, has_group=bool(group_fin),
+        triggers=triggers, recent_appts=recent_appts, recent_res=recent_res)
+    L.append("## Lead assessment")
+    L.append("")
+    L.append(la["verdict"])
+    L.append("")
+    if la["factors"]:
+        L.append("On the Companies House record:")
+        L.append("")
+        for fct in la["factors"]:
+            L.append(f"- {fct}")
+        L.append("")
+    L.append("This view draws only on Companies House data — it carries no "
+             "information on the people to contact, product fit, current "
+             "projects or buying intent, so treat it as one input to "
+             "qualification, not the whole picture.")
     L.append("")
 
     # ---- registration details ------------------------------------------
