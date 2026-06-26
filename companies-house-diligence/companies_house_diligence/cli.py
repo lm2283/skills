@@ -1,19 +1,19 @@
 """CLI: discover and classify a company's corporate structure.
 
-Usage:
-    python -m companies_house_diligence.cli --url https://www.example.com/about/
+Phase 1 (fetching raw HTML for the agent to read) is a separate step:
+    python -m companies_house_diligence.scrape https://example.com/contact
+
+Once you have read the HTML and found the registration number, anchor here:
     python -m companies_house_diligence.cli --number 01234567
-    python -m companies_house_diligence.cli --url ... --html saved.html --stem ACME
+    python -m companies_house_diligence.cli --name "Example Ltd" --postcode "EC1N 8TE"
 
 Outputs (into a per-company subdir <out>/<number>_<name-slug>/):
-    identifiers.json   extracted page identifiers
     structure.graphml  the discovery graph (open in Gephi/yEd)
     structure.json     nodes + edges + classifications
 """
 
 from __future__ import annotations
 
-import os
 import re
 import json
 import argparse
@@ -22,20 +22,16 @@ from pathlib import Path
 
 from .client import CompaniesHouseClient
 from .graph import StructureGraph, company_id
-from .scrape import extract, extract_site, Identifiers
 from . import discover
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Companies House structure discovery")
-    ap.add_argument("--url", help="company web page (ideally /about or /contact)")
-    ap.add_argument("--html", help="path to a saved HTML file (skip fetching)")
-    ap.add_argument("--no-follow", dest="follow", action="store_false",
-                    help="do not auto-follow same-site legal/privacy pages when "
-                         "the start page has no company number")
-    ap.add_argument("--max-pages", type=int, default=6,
-                    help="max legal/privacy pages to auto-follow (default 6)")
-    ap.add_argument("--number", help="anchor directly on this company number")
+    ap.add_argument("--number", help="anchor directly on this company number (preferred)")
+    ap.add_argument("--name", help="company name to anchor on when no number is known")
+    ap.add_argument("--postcode", action="append", default=[],
+                    help="registered-office postcode(s) seen on the page; used to "
+                         "confirm a name match (repeatable)")
     ap.add_argument("--stem", help="name stem for member discovery (default: first token of anchor name)")
     ap.add_argument("--out", default="output", help="output root; a per-company subdirectory is created inside it")
     ap.add_argument("--cache", default=".ch_cache", help="API cache dir ('' to disable)")
@@ -52,22 +48,19 @@ def main(argv=None):
     client = CompaniesHouseClient(cache_dir=args.cache or None)
     sg = StructureGraph()
 
-    # ---- Phase 1: identifiers --------------------------------------------
-    ids = Identifiers(url=args.number or "")
-    if args.url or args.html:
-        htmltext = Path(args.html).read_text(encoding="utf-8", errors="ignore") if args.html else None
-        ids = extract_site(args.url or "(local html)", htmltext,
-                           follow=args.follow, max_pages=args.max_pages)
-        print(f"[1] identifiers: numbers={ids.company_numbers} vat={ids.vat_numbers} "
-              f"postcodes={ids.postcodes[:3]}")
-        if len(ids.pages_read) > 1:
-            print(f"    pages read: {', '.join(ids.pages_read)}")
-
     # ---- Phase 2: anchor -------------------------------------------------
+    if not (args.number or args.name):
+        print("Provide --number (preferred) or --name [--postcode ...]. "
+              "Fetch and read the page first with "
+              "'python -m companies_house_diligence.scrape <url>'.")
+        return 2
     if args.number:
         anchor_num, method, conf = args.number, "explicit", "high"
+        if not client.company(anchor_num):
+            print(f"Company {anchor_num} not found on Companies House.")
+            return 2
     else:
-        ar = discover.anchor(client, ids)
+        ar = discover.anchor(client, name=args.name, postcodes=args.postcode)
         anchor_num, method, conf = ar.company_number, ar.method, ar.confidence
     if not anchor_num:
         print("Could not anchor on a company. Provide --number.")
@@ -78,8 +71,6 @@ def main(argv=None):
                   (prof.get("company_name") or "").lower()).strip("-")[:50]
     out = root / f"{anchor_num}_{slug}"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "identifiers.json").write_text(json.dumps(ids.to_dict(), indent=2),
-                                          encoding="utf-8")
     print(f"[2] anchor: {anchor_num} {prof.get('company_name')} "
           f"(method={method}, confidence={conf})")
     print(f"    output dir: {out}")
@@ -102,7 +93,7 @@ def main(argv=None):
     # ones, so a shared-service office is recognised even if the page omitted it.
     office_pc = (prof.get("registered_office_address", {}) or {}).get("postal_code", "")
     postcodes = ([office_pc] if office_pc else []) + [
-        p for p in ids.postcodes if p != office_pc]
+        p for p in args.postcode if p != office_pc]
     added = discover.discover_members(client, sg, stem, postcodes,
                                       max_candidates=args.max_candidates)
     print(f"[3b] discovered {len(added)} candidate companies (stem='{stem}')")

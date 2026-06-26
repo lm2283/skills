@@ -6,8 +6,6 @@ on the Companies House Public Data API.
 
 from .client import CompaniesHouseClient
 from .graph import StructureGraph
-from .scrape import extract, Identifiers
 from . import discover, enrich
 
-__all__ = ["CompaniesHouseClient", "StructureGraph", "extract",
-           "Identifiers", "discover", "enrich"]
+__all__ = ["CompaniesHouseClient", "StructureGraph", "discover", "enrich"]

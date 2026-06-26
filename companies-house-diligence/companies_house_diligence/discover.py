@@ -28,7 +28,6 @@ import networkx as nx
 
 from .client import CompaniesHouseClient
 from .graph import (StructureGraph, company_id, address_id, _ch_address)
-from .scrape import Identifiers
 
 LOG = logging.getLogger("ch.discover")
 
@@ -108,19 +107,27 @@ class AnchorResult:
     candidates: list[dict]
 
 
-def anchor(client: CompaniesHouseClient, ids: Identifiers) -> AnchorResult:
-    # 1. explicit company number on the page -> verify it exists
-    for num in ids.company_numbers:
-        prof = client.company(num)
+def anchor(client: CompaniesHouseClient, *, number: Optional[str] = None,
+           name: Optional[str] = None,
+           postcodes: Optional[list[str]] = None) -> AnchorResult:
+    """Resolve identifiers (read by the agent from the page) to one company.
+
+    Confidence, in order: an explicit, verified company ``number`` (high); a
+    ``name`` whose registered-office postcode matches one seen on the page
+    (high); a ``name`` best-guess only (low).
+    """
+    postcodes = postcodes or []
+    # 1. explicit company number -> verify it exists
+    if number:
+        prof = client.company(number)
         if prof:
-            return AnchorResult(num, "company-number-on-page", "high", [prof])
+            return AnchorResult(number, "company-number-on-page", "high", [prof])
 
     # 2. fall back to name + postcode correlation
     cands: list[dict] = []
-    name = ids.legal_names[0] if ids.legal_names else None
     if name:
         res = client.search_companies(name, items_per_page=20)
-        page_pcs = {p.replace(" ", "").upper() for p in ids.postcodes}
+        page_pcs = {p.replace(" ", "").upper() for p in postcodes}
         for item in res.get("items", []):
             prof = client.company(item["company_number"])
             if not prof:
