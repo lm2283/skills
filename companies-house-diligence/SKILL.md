@@ -11,13 +11,15 @@ description: >-
   /legal page) and wants to understand who owns it, what the group looks like,
   and where the commercial or risk signals are.
 compatibility: >-
-  Requires a Companies House API key in the COMPANIES_HOUSE_KEY environment
-  variable or a .env file, and the project virtualenv at .venv with the package
-  installed editable (networkx, requests, matplotlib, scipy, pypdf). Network
+  Cross-platform (Windows, macOS, Linux); pure Python, no admin rights or system
+  binaries needed. Requires a Companies House API key in the COMPANIES_HOUSE_KEY
+  environment variable or a .env file, and the skill virtualenv at .venv with the
+  package installed editable (networkx, requests, matplotlib, scipy, pymupdf).
+  PDF pages are rendered to images by pymupdf, so poppler is not needed. Network
   access to *.company-information.service.gov.uk and the target website is
-  required. Read-only against Companies House. Optional: pandoc (with the
-  bundled docx-build tool) to also emit a Word .docx, and the pdftoppm tool
-  (poppler-utils) to rasterise scanned group-accounts PDFs for reading.
+  required. Read-only against Companies House. Optional: pandoc to also emit a
+  Word .docx; when pandoc is absent the .docx is skipped and the Markdown
+  profile is produced regardless.
 ---
 
 # Companies House profile
@@ -46,19 +48,33 @@ directory** (the folder containing this `SKILL.md`), and all runtime artefacts
 First-time setup, run **from this skill directory**:
 
 ```bash
+# macOS / Linux
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e .            # registers the companies_house_diligence package
 ```
 
-The editable install makes `python -m companies_house_diligence...` importable
-from this directory. To also produce Word `.docx` profiles, install `pandoc`
-(the profile builds Markdown either way and falls back gracefully when pandoc is
-absent). To read scanned group-accounts PDFs, install `poppler-utils` (provides
-`pdftoppm`/`pdftotext`).
+```powershell
+# Windows (PowerShell). The interpreter is .venv\Scripts\python.exe
+py -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -e .
+```
 
-All commands in the phases below assume you are in this skill directory, so
-`.venv/bin/python ...` and the `output/` paths resolve as written. Profiles are
+The editable install makes `python -m companies_house_diligence...` importable
+from this directory.
+
+**Cross-platform notes.** The toolkit is pure Python and runs on Windows, macOS
+and Linux with **no admin rights and no system binaries**: PDF pages are
+rendered to images by PyMuPDF (a pip wheel, installed by `requirements.txt`),
+so poppler / `pdftoppm` is not needed. All files are read and written as UTF-8.
+The only optional external tool is **pandoc**, used solely to also emit a Word
+`.docx`; when pandoc is absent the toolkit simply skips the `.docx` and the
+Markdown profile (the primary artefact) is produced regardless. On Windows,
+write `.venv\Scripts\python` wherever the examples below show `.venv/bin/python`.
+
+All commands in the phases below assume you are in this skill directory, so the
+virtualenv interpreter and the `output/` paths resolve as written. Profiles are
 written under `output/` here by default; pass `--out <absolute-path>` if you
 want them somewhere else.
 
@@ -80,41 +96,47 @@ The toolkit is the `companies_house_diligence/` package inside this skill:
 | Module | Role |
 | --- | --- |
 | `client.py` | API client: auth, 429 backoff, on-disk cache, document content |
-| `scrape.py` | Phase 1: extract identifiers from a web page |
+| `scrape.py` | Phase 1: fetch a page's raw HTML (and likely legal pages); no parsing |
 | `graph.py` | networkx schema (Company/External/Person/Address nodes), office occupancy |
-| `discover.py` | Phases 2–3b: anchor, walk up, discover members, classify |
-| `accounts.py` | Phase 4: pull headline figures from filed accounts (iXBRL) + fetch group PDFs |
-| `enrich.py` | Phases 4–6: financials/risk/people enrichment calls |
+| `discover.py` | Phases 2-4: anchor, walk up, discover members, classify |
+| `accounts.py` | Phase 5: headline figures from iXBRL accounts; download + render group PDFs to images |
+| `enrich.py` | Phases 5-7: financials/risk/people enrichment calls |
 | `plain.py` | plain-language helpers: SIC lookup, money/trend formatting, size bands |
-| `brief.py` | Phase 7: render the Companies House profile (`brief.md`, and `brief.docx` via pandoc) |
-| `cli.py` | orchestrates Phases 1–3b; writes `output/` |
+| `brief.py` | Phase 8: render the profile (`brief.md`, plus `brief.docx` when pandoc is present) |
+| `cli.py` | orchestrates Phases 2-4; writes `output/` |
 | `viz.py` | renders the ownership tree and evidence graphs (optional, not embedded) |
 
-The `docx-build/` directory holds the pandoc pipeline (`reference.docx` and lua
-filters, driven by `build.sh`); `brief.py` calls `build.sh` to convert
-`brief.md` into a styled Word document.
+The `docx-build/` directory holds the pandoc assets (`reference.docx` and lua
+filters); `brief.py` invokes `pandoc` directly (no shell), so the `.docx` build
+works the same on Windows, macOS and Linux and is skipped cleanly when pandoc is
+not installed.
 
 All code is company-agnostic. Do not hard-code names, numbers or postcodes.
 
 ## Quick start (end to end)
 
 ```bash
-export COMPANIES_HOUSE_KEY=...                       # or rely on .env
-# 1-3b: identify, anchor, ownership, members, classify.
-# Writes to a per-company subdir: output/<number>_<name-slug>/ (printed as 'output dir').
-.venv/bin/python -m companies_house_diligence.cli --url https://www.example.com/about/
+export COMPANIES_HOUSE_KEY=...                       # or put it in .env here
+
+# Phase 1 - fetch the page's raw HTML (and likely legal pages) to read by eye:
+.venv/bin/python -m companies_house_diligence.scrape https://www.example.com/contact
+#   writes output/_scrape/page_NN_*.html ; read them and find the company number
+
+# Phases 2-4 - anchor, walk ownership up, discover members, classify:
+.venv/bin/python -m companies_house_diligence.cli --number 01234567
+#   writes a per-company subdir output/<number>_<name-slug>/ (printed as 'output dir')
 
 # point the rest at that subdir:
 D=output/01234567_example-limited        # use the dir the CLI printed
 
-# 4-7: enrich + render the profile (writes $D/brief.md and, if pandoc is
-# present, $D/brief.docx via the bundled docx-build tool; --no-docx to skip).
+# Phases 5-8 - enrich + render the profile (writes $D/brief.md and, when pandoc
+# is present, $D/brief.docx; --no-docx to skip):
 .venv/bin/python -m companies_house_diligence.brief --out "$D"
 ```
 
 Each company gets its own `output/<number>_<slug>/` directory, so several
-companies can sit side by side in the same repo. The profile is `$D/brief.md`
-(plus `$D/brief.docx`); supporting artefacts are alongside it. The ownership
+companies can sit side by side. The profile is `$D/brief.md` (plus `$D/brief.docx`
+when pandoc is available); supporting artefacts are alongside it. The ownership
 tree graphic is **not** embedded in the profile (the text chain of control is
 clear enough); render it separately only if you want it (see Visualising the
 structure). The phase-by-phase detail below explains each step and how to
@@ -122,73 +144,70 @@ interpret it. (Pass `--out <root>` to the CLI to change the output root.)
 
 ---
 
-## Phase 1 — Identify the company from its website
+## Phase 1 - Fetch the company's web page
 
-Goal: extract high-signal identifiers, not marketing prose. The richest
-sources are the **footer**, **structured data** (`<script type="application/
-ld+json">`) and contact/legal pages.
+Goal: get the raw HTML in front of you and **read it yourself** for the
+high-signal identifiers. You read HTML far more reliably than any regex, so the
+toolkit does no parsing; it only fetches.
 
-You have two equivalent options:
+```bash
+.venv/bin/python -m companies_house_diligence.scrape https://www.example.com/contact
+#   --no-follow      fetch only this page
+#   --max-pages N    how many same-site legal/privacy/contact pages to also fetch (default 6)
+#   --out DIR        where to write the .html files (default output/_scrape)
+```
 
-1. **Let the toolkit scrape** (default): pass the URL to the CLI in Phase 2.
-2. **Read the raw HTML yourself**: fetch the page (`curl -sL <url>`), read it,
-   and pick out identifiers by eye. Viewing raw HTML is often enough — look for:
-   - **company registration number** (the killer identifier: 8 digits, or a
-     2-letter prefix + 6 digits such as `SC`, `NI`, `OC`)
-   - VAT number, legal entity name(s) (anything ending Limited/Ltd/PLC/LLP)
-   - **registered-office address / postcode** (used later to correlate)
-   - contact emails and phone numbers
+This fetches the page and, unless `--no-follow` is set, the top-ranked same-site
+legal/privacy/contact links (privacy and legal pages first, because UK companies
+must publish their registered number and office somewhere, usually the footer or
+a legal page). It writes one `page_NN_<slug>.html` per page and prints the
+paths. (You can equally fetch with `curl -sL <url>` if you prefer.)
 
-Prefer `/about`, `/contact`, `/legal`, `/terms` and `/privacy` pages — UK
-companies must publish their registered number and office somewhere, usually
-the footer or a legal page.
+Then **read those `.html` files** and pick out, by eye:
 
-**Auto-following.** When the toolkit scrapes (option 1) and the page you give it
-has no company number, the CLI automatically follows same-site
-legal/privacy/contact links (ranked: privacy and legal pages first) and merges
-their identifiers, stopping as soon as a number is found. So a bare `/contact`
-URL whose number actually lives on `/privacy-policy` now anchors on its own. The
-pages it read are printed and saved in `identifiers.json` (`pages_read`). Use
-`--no-follow` to disable this, or `--max-pages N` to widen/narrow the crawl
-(default 6, same host only). A saved `--html` file is never crawled.
+- **company registration number** - the killer identifier: 8 digits, or a
+  2-letter prefix + 6 digits such as `SC`, `NI`, `OC`
+- legal entity name(s) (anything ending Limited/Ltd/PLC/LLP)
+- **registered-office address / postcode** (used to confirm a name match)
+- VAT number, contact emails (supporting only)
 
-**Checkpoint:** if no company number is found anywhere, note it; Phase 2 will
-fall back to name + postcode search, which is weaker.
+Prefer `/about`, `/contact`, `/legal`, `/terms` and `/privacy` pages.
+
+**Checkpoint:** if no company number appears anywhere, note it; Phase 2 can fall
+back to name + postcode search, which is weaker.
 
 ---
 
-## Phase 2 — Anchor on a single company
+## Phase 2 - Anchor on a single company
 
-Resolve the identifiers to exactly one Companies House entity.
+Resolve what you read to exactly one Companies House entity.
 
 ```bash
-# from a URL (toolkit scrapes the page):
-.venv/bin/python -m companies_house_diligence.cli --url https://www.example.com/about/
-
-# or anchor directly if you already know the number:
+# preferred: you found the registration number on the page
 .venv/bin/python -m companies_house_diligence.cli --number 01234567
 
-# or from a saved HTML file:
-.venv/bin/python -m companies_house_diligence.cli --url https://example.com --html saved.html
+# fallback: no number on the page, so match by name and the office postcode you saw
+.venv/bin/python -m companies_house_diligence.cli --name "Example Ltd" --postcode "EC1N 8TE"
 ```
 
-Anchoring logic (in order of confidence):
+Anchoring confidence, in order:
 
-1. **Company number on the page** → verify it resolves → high confidence.
-2. **Name + registered-office postcode match** → high confidence.
-3. **Name best-guess only** → low confidence; flag for the user.
+1. **Verified company number** -> high confidence.
+2. **Name + registered-office postcode match** -> high confidence.
+3. **Name best-guess only** (no postcode match) -> low confidence; flag for the user.
 
-The CLI prints the anchor and method. **Checkpoint:** if confidence is low,
-confirm the entity with the user before proceeding.
+The CLI prints the anchor and method, and creates the per-company output
+subdirectory. **Checkpoint:** if confidence is low, confirm the entity with the
+user before proceeding.
 
 Read the anchor's profile critically. **Previous names are a strong tell**:
-names like `… (BIDCO) LIMITED`, `… TOPCO`, `… MIDCO`, `… HOLDCO` signal a
-private-equity buyout structure — which means you must trace ownership upward,
+names like `... (BIDCO) LIMITED`, `... TOPCO`, `... MIDCO`, `... HOLDCO` signal a
+private-equity buyout structure, which means you must trace ownership upward,
 not stop at the first entity.
 
 ---
 
-## Phase 3 — Walk the ownership chain upward
+## Phase 3 - Walk the ownership chain upward
 
 The CLI follows active corporate **PSC** (persons-with-significant-control)
 edges from the anchor up to the ultimate UK-visible owner, resolving parents
@@ -213,10 +232,10 @@ Interpretation:
 
 ---
 
-## Phase 3b — Discover group members and filter impostors
+## Phase 4 - Discover group members and filter impostors
 
-This is where the graph earns its keep. The CLI discovers candidate group
-members two ways, then classifies each by graph topology, never by name:
+This runs as part of the same CLI command as Phases 2-3. It discovers candidate
+group members two ways, then classifies each by graph topology, never by name:
 
 1. **Name stem** — the top `--max-candidates` (default 40) relevance-ranked
    search hits for the anchor's distinctive name token.
@@ -238,13 +257,12 @@ neither a name stem nor a non-shared registered office; state that limitation.
 ```bash
 # --stem lets you set the name fragment to search (default: first token of the
 # anchor's name). Pick a distinctive stem.
-.venv/bin/python -m companies_house_diligence.cli --url https://www.example.com/about/ --stem ACME
+.venv/bin/python -m companies_house_diligence.cli --number 01234567 --stem ACME
 ```
 
 Outputs (in the per-company subdir `output/<number>_<slug>/`, referred to as
 `$D` below):
 
-- `identifiers.json` — what Phase 1 extracted
 - `structure.json` — anchor, ownership chain, and every company with a label
 - `structure.graphml` — the full graph (open in Gephi/yEd, or render below)
 
@@ -299,27 +317,27 @@ profile itself stays text-only. Share a render with the user only if they ask.
 
 ---
 
-## Phases 4–7 — Enrich and produce the brief
+## Phases 5-8 - Enrich and produce the profile
 
-Phases 4–6 (financials, leverage/risk, people/triggers) and Phase 7 (the
-Markdown brief) are run by a single command once discovery has written
+Phases 5-7 (financials, leverage/risk, people/triggers) and Phase 8 (the
+Markdown profile) are run by a single command once discovery has written
 `$D/structure.json`:
 
 ```bash
 .venv/bin/python -m companies_house_diligence.brief --out "$D"
 #   --no-financials / --no-risk    skip those enrichment calls
-#   --download-accounts            download group-accounts PDFs that have no iXBRL
+#   --download-accounts            download group-accounts PDFs and render them to images
 #   --no-docx                      write Markdown only (skip the .docx)
 ```
 
-This writes `$D/brief.md` and, when pandoc is available, `$D/brief.docx` (via
-the bundled `docx-build/` pipeline; pass `--no-docx` to skip). The profile is
-text-only and embeds no graphic.
-The sections below explain what each phase gathers and how to read it; the
-underlying calls are documented in `Documentation/` (open the relevant Markdown
-files directly).
+This writes `$D/brief.md` and, when pandoc is available, `$D/brief.docx` (pandoc
+is invoked directly, no shell; pass `--no-docx` to skip, and it is skipped
+automatically when pandoc is not installed). The profile is text-only and embeds
+no graphic. The sections below explain what each phase gathers and how to read
+it; the underlying calls are documented in `Documentation/` (open the relevant
+Markdown files directly).
 
-### Phase 4 — financials (with real figures)
+### Phase 5 - financials (with real figures)
 
 There are two places the numbers live, and the toolkit handles each differently:
 
@@ -333,41 +351,49 @@ plain table with year-on-year trends. No PDF reading needed. (Note: small
 companies often elect **not** to file a profit & loss account, so turnover and
 profit may simply be absent; balance-sheet items still come through.)
 
-**b) Whole-group (consolidated) accounts (usually PDF — often scanned).** Real
+**b) Whole-group (consolidated) accounts (usually PDF - often scanned).** Real
 group revenue/EBITDA sit in the **group accounts**, filed at one or two entities
 in the chain. The tool flags every Confirmed company whose `accounts_type` is
 `group`. These are frequently filed as **PDF only**, and large audited group
-accounts are often **scanned images with no text layer** — so they cannot be
-parsed automatically. With `--download-accounts` the tool downloads each such
-PDF next to the brief and reports whether it has a readable text layer.
+accounts are often **scanned images with no text layer**, so they cannot be
+parsed. With `--download-accounts` the tool downloads each such PDF and renders
+**every page to a high-quality image** (via PyMuPDF), into a self-contained
+folder per document:
 
-**When the group PDF is image-only, read it yourself (you are vision-capable).**
-Rasterise the relevant pages and read them:
-
-```bash
-# find the statements via the Contents page, then render a few pages to PNG
-pdftoppm -png -r 120 -f <first> -l <last> "$D/group_accounts_<number>.pdf" /tmp/pg
+```
+$D/group_accounts_<number>/
+    accounts.pdf
+    pages/
+        page_001.png
+        page_002.png
+        ...
 ```
 
-Then open the PNGs with the `read` tool and transcribe the headline figures into
-the brief's Money section. The pages worth reading, in order:
+**Read the page images directly (you are multimodal).** Open the PNGs under
+`$D/group_accounts_<number>/pages/` with the `read` tool and transcribe the
+headline figures into the profile's Financial summary. There is no text
+extraction step and no fallback: the images are the interface. The pages worth
+reading, in order:
 
-- **Contents** (page ~2) — gives the exact page numbers of each statement.
-- **Strategic report** (early) — the plain-English story: what they do, any
+- **Contents** (page ~2) - gives the exact page numbers of each statement.
+- **Strategic report** (early) - the plain-English story: what they do, any
   **acquisition / buyout** (date, buyer, enterprise value, new debt raised),
   and the growth strategy. This is usually the richest "why reach out now".
-- **Consolidated income statement** — Revenue, gross profit, operating
+- **Consolidated income statement** - Revenue, gross profit, operating
   profit/loss, finance costs, profit/loss before tax, and any **management
   revenue / management EBITDA** (the non-GAAP numbers PE owners actually track).
-- **Consolidated balance sheet** — total assets, cash, **borrowings**
+- **Consolidated balance sheet** - total assets, cash, **borrowings**
   (the leveraged debt), net assets / total equity.
+- The **subsidiary note** ("Investments"/"Group undertakings") - the definitive
+  list of group members, including differently-named ones the Phase 4 search
+  missed. Cross-check it against the Confirmed list and add any it names.
 
-State in plain terms what the numbers mean — e.g. a heavily indebted PE-owned
+State in plain terms what the numbers mean - e.g. a heavily indebted PE-owned
 group can be highly profitable at the EBITDA level yet report a pre-tax *loss*
 purely because of interest on the buyout debt; that is a financing artefact, not
 a failing business. Always cite the entity, statement and period you read from.
 
-### Phase 5 — leverage and risk
+### Phase 6 - leverage and risk
 
 For each Confirmed company the tool reports **charges** (outstanding vs
 satisfied, `created_on`, and `persons_entitled` — the lenders / security
@@ -378,7 +404,7 @@ and holder; legacy bank debentures that are satisfied are historical.
 For notable directors you can additionally screen disqualifications by hand:
 `GET /search/disqualified-officers?q=<name>` — any hit is a serious flag.
 
-### Phase 6 — people and timing triggers
+### Phase 7 - people and timing triggers
 
 The tool lists the anchor's **current directors**, **recent board changes**
 (last ~18 months — a new CEO/CFO or a departing founder is a strong sales and
@@ -386,7 +412,7 @@ governance signal), **recently incorporated** group entities, and **rebrands**
 (`former_names`, which often expose the whole acquisition history). New
 `Newco/Bidco` layers from Phase 3 are the clearest "why reach out now" hook.
 
-### Phase 7 — the profile
+### Phase 8 - the profile
 
 `brief.md` is titled "Companies House profile" and is written for a reader
 without a finance background, in a measured, presentable register suitable for
@@ -396,12 +422,23 @@ styling, no emoji, and no scattered editorialising.
 Structure:
 
 - **Summary** — a short prose paragraph (or two) at the top: what the company
-  is, its size, ownership type, financial position, recent events, and a single
-  brief note on commercial relevance. All commercial framing lives here; the
-  rest of the brief is factual.
+  is, its size, ownership type, financial position and recent events. Keep the
+  factual framing here; the explicit lead view lives in the next section.
+- **Lead assessment** — a measured, sales-oriented read of how well-qualified
+  the company looks *as a lead*, drawn only from Companies House signals (see
+  the sales-lens pass below).
 - **Registration details**, **Ownership and group structure**, **Financial
   summary**, **Borrowing and risk**, **Directors and recent changes**,
   **Glossary** (only the terms actually used), **References**, **Caveats**.
+
+**Editorial passes, in this order.** After `brief.py` writes the draft, refine
+it on `brief.md` in this sequence, then build the `.docx` last:
+
+1. Rewrite the *Ownership and group structure* section (see below).
+2. Fill in the *Financial summary* from the rendered group-account images
+   (Phase 5), with citations.
+3. The **sales-lens pass** on the Summary and Lead assessment (see below).
+4. The **styling pass** that removes machine-written tics (see below).
 
 **Presenting the group structure (do this deliberately; it is the part readers
 remember).** `brief.py` emits a serviceable default for *Ownership and group
@@ -447,15 +484,40 @@ company.
 Companies House page or filing they came from (profile, PSC, charges, officers,
 filing history). The markers resolve in a **References** list; the **Caveats**
 section is separate and states the limitations. When you transcribe figures from
-a PDF by hand (Phase 4), cite the source filing the same way.
+a group-account image (Phase 5), cite the source filing the same way.
 
 Always present Probable/Possible as leads to verify, never as fact. Attach the
 per-Probable evidence graphs from `$D/probables/` as an appendix if the user
 wants the justification. Offer JSON alongside Markdown if useful
 (`structure.json` already holds the structured data).
 
-**Final styling pass (do this last, on `brief.md`, before building the
-`.docx`).** Re-read the finished brief and strip the tics that make text read as
+**Sales-lens pass (do this after the figures are in, before the styling pass).**
+`brief.py` emits a measured *Lead assessment* by rule from Companies House
+signals (size, growth, ownership/decision-making, timing triggers, risk) plus a
+plain *Summary*. Refine both with a sales reader in mind, and keep them honest:
+
+- **Qualify the lead, do not sell it.** State how well-qualified the company
+  looks as a lead and why, in plain terms. Stay measured and free of hyperbole:
+  no "exciting opportunity", no superlatives, no manufactured urgency.
+- **Be honest when nothing stands out.** If the Companies House record shows
+  nothing that clearly marks the company out, say so plainly ("nothing here
+  strongly distinguishes it as a lead; prioritise only if other signals support
+  it"). A lukewarm or negative read is more useful than false enthusiasm.
+- **Lead with the "why now" and "why them".** Surface the genuine hooks a
+  salesperson can act on: a recent buyout or refinancing, a new CEO/CFO, rapid
+  growth, a new market, a newly incorporated entity. Tie the qualification to
+  these, not to vague potential.
+- **State the basis and its limits.** This judgement rests only on Companies
+  House data, which carries no contact, product-fit, current-project or
+  buying-intent information. Keep the line that says so; it is one input to lead
+  qualification, not the whole picture.
+- **Calibrate to size and ownership.** Budget capacity scales with size; a
+  PE-owned group buys centrally and on ROI; a subsidiary may not hold the
+  budget; an owner-managed company is a direct founder sell. Reflect this in the
+  qualification rather than treating every company the same.
+
+**Styling pass (do this last, on `brief.md`, before building the `.docx`).**
+Re-read the finished brief and strip the tics that make text read as
 machine-written, so it looks like a person wrote it:
 
 - **Remove em dashes and en dashes.** Replace `—` / `–` with a comma, a colon,
@@ -495,5 +557,6 @@ doing this — it is a copy-edit, not a rewrite.
   facts are extracted automatically from **iXBRL** for companies that file it
   (most small/micro entities), but small companies may omit a profit & loss
   account, and large **group accounts are usually PDF-only and often scanned
-  images** — those must be read by hand (rasterise + read; see Phase 4).
+  images** — those are downloaded and rendered to page images for you to read
+  directly (see Phase 5).
 - Data reflects the latest filings, which can lag real-world events.
