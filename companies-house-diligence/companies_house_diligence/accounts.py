@@ -7,12 +7,14 @@ figures (net worth, cash, headcount, and turnover/profit when disclosed)
 without guessing from prose.
 
 Large *group* (consolidated) accounts are usually filed as **PDF only**, and
-those PDFs are frequently scanned images with no text layer — so they cannot be
-parsed reliably here. For those we download the PDF and flag it for a human (or
-a vision-capable agent) to read; see `fetch_accounts_pdf`.
+those PDFs are frequently scanned images with no text layer. We do not try to
+parse them: instead we download each one into its own subdirectory and render
+every page to a high-quality PNG, which a multimodal agent can read natively.
+See ``fetch_accounts_pdf``.
 
 Dependency policy: iXBRL parsing uses only the standard library (regex over the
-XML). PDF download uses the API client. No heavyweight deps required.
+XML). PDF download uses the API client; page rendering uses PyMuPDF (a
+pip-installable wheel, so no system binaries or admin rights are needed).
 """
 
 from __future__ import annotations
@@ -189,20 +191,56 @@ def fetch_figures(client: CompaniesHouseClient, number: str) -> Optional[dict]:
 
 
 def fetch_accounts_pdf(client: CompaniesHouseClient, metadata_url: str,
-                       dest) -> dict:
-    """Download an accounts PDF to `dest`. Reports whether it has a text layer.
+                       doc_dir, *, dpi: int = 150) -> dict:
+    """Download an accounts PDF and render every page to a high-quality image.
 
-    Returns {'path', 'bytes', 'has_text'}; has_text=False usually means the
-    accounts were filed as a scanned image and need a human / vision pass."""
-    data = client.document_content(metadata_url, "application/pdf", binary=True)
+    Builds a self-contained document folder so a multimodal agent can read the
+    accounts page by page without any text-extraction step:
+
+        <doc_dir>/
+            accounts.pdf
+            pages/
+                page_001.png
+                page_002.png
+                ...
+
+    Returns ``{'pdf_path', 'pages_dir', 'page_count', 'image_paths', 'bytes'}``.
+    Rendering uses PyMuPDF; if it is not installed the PDF is still saved and
+    ``page_count`` is 0 with a note in ``error`` (install pymupdf to enable
+    rendering). There is no text-layer fallback by design.
+    """
     from pathlib import Path
-    p = Path(dest)
-    p.write_bytes(data)
-    has_text = False
+    doc_dir = Path(doc_dir)
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    data = client.document_content(metadata_url, "application/pdf", binary=True)
+    pdf_path = doc_dir / "accounts.pdf"
+    pdf_path.write_bytes(data)
+
+    pages_dir = doc_dir / "pages"
+    image_paths: list[str] = []
+    error = None
     try:
-        from pypdf import PdfReader
-        r = PdfReader(str(p))
-        has_text = any((pg.extract_text() or "").strip() for pg in r.pages[:15])
-    except Exception:
-        pass
-    return {"path": str(p), "bytes": len(data), "has_text": has_text}
+        import fitz  # PyMuPDF
+        pages_dir.mkdir(parents=True, exist_ok=True)
+        zoom = dpi / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+        with fitz.open(str(pdf_path)) as pdf:
+            for i, page in enumerate(pdf, 1):
+                pix = page.get_pixmap(matrix=matrix)
+                img = pages_dir / f"page_{i:03d}.png"
+                pix.save(str(img))
+                image_paths.append(str(img))
+    except ImportError:
+        error = ("PyMuPDF is not installed; saved the PDF but could not render "
+                 "page images. Install it with 'pip install pymupdf'.")
+    except Exception as e:  # corrupt/encrypted PDF etc.
+        error = f"could not render pages: {e}"
+
+    return {
+        "pdf_path": str(pdf_path),
+        "pages_dir": str(pages_dir),
+        "page_count": len(image_paths),
+        "image_paths": image_paths,
+        "bytes": len(data),
+        "error": error,
+    }

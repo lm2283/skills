@@ -220,10 +220,10 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
             if not figs and download_accounts:
                 doc = accounts.fetch_latest_accounts_doc(client, f["company_number"])
                 if doc and "application/pdf" in (doc.get("formats") or {}):
-                    dest = outdir / f"group_accounts_{f['company_number']}.pdf"
+                    doc_dir = outdir / f"group_accounts_{f['company_number']}"
                     try:
                         pdf_info = accounts.fetch_accounts_pdf(
-                            client, doc["metadata_url"], dest)
+                            client, doc["metadata_url"], doc_dir)
                     except Exception:
                         pdf_info = None
             group_fin.append((f, figs, pdf_info))
@@ -433,19 +433,24 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
                     for sub in _figs_table(figs):
                         L.append(f"  {sub}")
                 elif pdf_info:
-                    if pdf_info["has_text"]:
-                        state = ("The PDF has a readable text layer; open it to "
-                                 "read the figures.")
+                    rel = Path(pdf_info["pages_dir"]).relative_to(outdir)
+                    if pdf_info["page_count"]:
+                        L.append(
+                            f"  - Downloaded and rendered to {pdf_info['page_count']} "
+                            f"page images under {rel}/ "
+                            f"(PDF: {Path(pdf_info['pdf_path']).relative_to(outdir)}, "
+                            f"{pdf_info['bytes']//1024} KB). Read the page images "
+                            "to transcribe the headline figures.")
                     else:
-                        state = ("The PDF is a scanned image with no text layer, "
-                                 "so the figures must be read manually from the "
-                                 "document.")
-                    L.append(f"  - Downloaded to {Path(pdf_info['path']).name} "
-                             f"({pdf_info['bytes']//1024} KB). {state}")
+                        L.append(
+                            f"  - Downloaded the PDF "
+                            f"({Path(pdf_info['pdf_path']).relative_to(outdir)}, "
+                            f"{pdf_info['bytes']//1024} KB), but could not render "
+                            f"page images: {pdf_info.get('error')}")
                 else:
                     L.append("  - No machine-readable data is available; the "
                              "figures are in the PDF accounts. Re-run with "
-                             "--download-accounts to retrieve the PDF.")
+                             "--download-accounts to download and render them.")
             L.append("")
 
     # ---- borrowing and risk (only if there is something to report) ------
@@ -568,8 +573,9 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
              f"{_dt.date.today().isoformat()}, and reflects the latest filings, "
              "which can lag real-world events. This brief is read-only.")
     L.append("- Financial figures are taken from filed accounts. Figures for "
-             "companies that file iXBRL data are extracted automatically; any "
-             "figures from PDF-only group accounts are read manually and "
+             "companies that file iXBRL data are extracted automatically; "
+             "PDF-only group accounts are downloaded and rendered to page "
+             "images, and the headline figures are read from those images and "
              "attributed to the source filing.")
     L.append("- Group membership is established by verified ownership for "
              "Confirmed members. Downward discovery relies on name-stem and "
