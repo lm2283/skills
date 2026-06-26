@@ -276,7 +276,8 @@ def _money_read(figs: dict) -> list[str]:
 
 
 def build_brief(outdir: Path, do_financials=True, do_risk=True,
-                download_accounts=False, cache_dir=".ch_cache") -> Path:
+                download_accounts=False, cache_dir=".ch_cache",
+                ascii_only=True) -> Path:
     struct = json.loads((outdir / "structure.json").read_text(encoding="utf-8"))
     g = nx.read_graphml(str(outdir / "structure.graphml"))
     attrs = _node_attrs_by_number(g)
@@ -430,9 +431,9 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
         for fct in la["factors"]:
             L.append(f"- {fct}")
         L.append("")
-    L.append("This view draws only on Companies House data — it carries no "
+    L.append("This view draws only on Companies House data, so it carries no "
              "information on the people to contact, product fit, current "
-             "projects or buying intent, so treat it as one input to "
+             "projects or buying intent; treat it as one input to "
              "qualification, not the whole picture.")
     L.append("")
 
@@ -702,7 +703,10 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
     L.append("")
 
     brief_path = outdir / "brief.md"
-    brief_path.write_text("\n".join(L), encoding="utf-8")
+    text = "\n".join(L)
+    if ascii_only:
+        text = plain.asciify(text)
+    brief_path.write_text(text, encoding="utf-8")
     return brief_path
 
 
@@ -746,6 +750,7 @@ def build_docx(md_path: Path) -> Optional[Path]:
 
 
 def main(argv=None):
+    plain.configure_stdout()
     ap = argparse.ArgumentParser(description="Render the Companies House profile")
     ap.add_argument("--out", default="output", help="per-company dir (with structure.json)")
     ap.add_argument("--no-financials", action="store_true")
@@ -756,9 +761,14 @@ def main(argv=None):
                     help="API cache dir ('' to disable); match the CLI")
     ap.add_argument("--no-docx", action="store_true",
                     help="skip building the .docx (Markdown only)")
+    ap.add_argument("--no-ascii", action="store_true",
+                    help="keep non-ASCII characters (pound signs, accents) in "
+                         "brief.md; by default the profile is written as plain "
+                         "ASCII to avoid Windows encoding issues")
     args = ap.parse_args(argv)
     p = build_brief(Path(args.out), not args.no_financials, not args.no_risk,
-                    args.download_accounts, args.cache)
+                    args.download_accounts, args.cache,
+                    ascii_only=not args.no_ascii)
     print("wrote", p)
     if not args.no_docx:
         d = build_docx(p)

@@ -116,6 +116,8 @@ def save_pages(pages: list[tuple[str, str]], outdir) -> list[Path]:
 
 def main(argv=None):
     import argparse
+    from . import plain
+    plain.configure_stdout()
     ap = argparse.ArgumentParser(
         description="Fetch raw HTML of a company page (and likely legal pages) "
                     "for an agent to read. No parsing is done.")

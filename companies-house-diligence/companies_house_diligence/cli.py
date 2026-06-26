@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .client import CompaniesHouseClient
 from .graph import StructureGraph, company_id
-from . import discover
+from . import discover, plain
 
 
 def main(argv=None):
@@ -41,6 +41,7 @@ def main(argv=None):
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
+    plain.configure_stdout()
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(name)s %(levelname)s %(message)s")
     root = Path(args.out)

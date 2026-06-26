@@ -6,7 +6,64 @@ Kept deliberately small and generic. No company-specific logic.
 
 from __future__ import annotations
 
+import sys
+import unicodedata
 from typing import Optional
+
+# Explicit transliterations for characters that have a sensible ASCII spelling
+# but would otherwise be dropped or mangled. Applied before NFKD normalisation.
+_ASCII_MAP = {
+    "\u00a3": "GBP ",   # pound
+    "\u20ac": "EUR ",   # euro
+    "\u00a5": "JPY ",   # yen
+    "\u2013": "-", "\u2014": "-", "\u2012": "-", "\u2212": "-",  # dashes
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u2032": "'",  # single quotes
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u2033": '"',  # double quotes
+    "\u2026": "...",                                              # ellipsis
+    "\u2022": "-", "\u00b7": "-", "\u2027": "-",                  # bullets/dots
+    "\u2122": "(TM)", "\u00ae": "(R)", "\u00a9": "(C)",
+    "\u00a0": " ", "\u2009": " ", "\u202f": " ", "\u200b": "",   # spaces
+    # Latin letters NFKD does not decompose (strokes, ligatures), common in names
+    "\u0141": "L", "\u0142": "l",   # L with stroke
+    "\u00d8": "O", "\u00f8": "o",   # O with stroke
+    "\u0110": "D", "\u0111": "d", "\u00d0": "D", "\u00f0": "d",  # D with stroke / eth
+    "\u00de": "Th", "\u00fe": "th",  # thorn
+    "\u00df": "ss",                  # sharp s
+    "\u00c6": "AE", "\u00e6": "ae",  # ae ligature
+    "\u0152": "OE", "\u0153": "oe",  # oe ligature
+}
+
+
+def asciify(text: str) -> str:
+    """Return a plain-ASCII version of ``text``.
+
+    Maps common symbols to ASCII spellings (pound -> 'GBP', em/en dashes -> '-',
+    smart quotes -> straight), transliterates accented letters to their base
+    form (NFKD, e.g. 'Cafe', 'Lodz'), and drops anything still non-ASCII. This
+    makes every generated artefact safe on a Windows console / cp1252 pipe and
+    removes the whole class of encoding problems.
+    """
+    if not text:
+        return text
+    for src, dst in _ASCII_MAP.items():
+        text = text.replace(src, dst)
+    text = unicodedata.normalize("NFKD", text)
+    return text.encode("ascii", "ignore").decode("ascii")
+
+
+def configure_stdout() -> None:
+    """Make stdout/stderr UTF-8 so prints never crash on a Windows cp1252 pipe.
+
+    When a tool's output is captured (as an agent harness does), Python encodes
+    stdout with the locale code page, and printing an accented company name
+    raises UnicodeEncodeError. Reconfiguring to UTF-8 with errors='replace'
+    removes that failure mode. No-op where reconfigure is unavailable.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 # A small map of the SIC codes most common among the companies this skill is
 # pointed at (tech, software, services). Unknown codes degrade gracefully to
