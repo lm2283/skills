@@ -73,6 +73,14 @@ The only optional external tool is **pandoc**, used solely to also emit a Word
 Markdown profile (the primary artefact) is produced regardless. On Windows,
 write `.venv\Scripts\python` wherever the examples below show `.venv/bin/python`.
 
+**Output is plain ASCII by design.** To avoid Windows encoding problems, the
+profile is written as ASCII (a pound sign becomes `GBP`, dashes become `-`, and
+accented names are flattened, e.g. `Cafe`), and every command forces UTF-8 on
+stdout so printing an accented company name never crashes. Keep your own edits
+to `brief.md` ASCII too, and run the asciify step (Phase 8) as the last thing
+before building the `.docx`. Pass `--no-ascii` to `brief` only if you know the
+reader's environment handles UTF-8.
+
 All commands in the phases below assume you are in this skill directory, so the
 virtualenv interpreter and the `output/` paths resolve as written. Profiles are
 written under `output/` here by default; pass `--out <absolute-path>` if you
@@ -101,8 +109,9 @@ The toolkit is the `companies_house_diligence/` package inside this skill:
 | `discover.py` | Phases 2-4: anchor, walk up, discover members, classify |
 | `accounts.py` | Phase 5: headline figures from iXBRL accounts; download + render group PDFs to images |
 | `enrich.py` | Phases 5-7: financials/risk/people enrichment calls |
-| `plain.py` | plain-language helpers: SIC lookup, money/trend formatting, size bands |
+| `plain.py` | plain-language helpers: SIC lookup, money/trend formatting, size bands, ASCII transliteration |
 | `brief.py` | Phase 8: render the profile (`brief.md`, plus `brief.docx` when pandoc is present) |
+| `asciify.py` | rewrite text files (e.g. an edited `brief.md`) as plain ASCII |
 | `cli.py` | orchestrates Phases 2-4; writes `output/` |
 | `viz.py` | renders the ownership tree and evidence graphs (optional, not embedded) |
 
@@ -520,24 +529,29 @@ plain *Summary*. Refine both with a sales reader in mind, and keep them honest:
 Re-read the finished brief and strip the tics that make text read as
 machine-written, so it looks like a person wrote it:
 
-- **Remove em dashes and en dashes.** Replace `—` / `–` with a comma, a colon,
-  a full stop, or parentheses — whichever the sentence actually needs — and
-  rephrase if a dash was papering over a weak join. Keep hyphens in genuine
-  compounds (`asset-based`, `private-equity-backed`) and the number ranges in
-  the chain/tables (e.g. `50-75%`, page `3-9`).
+- **Remove em dashes and en dashes.** `brief.py` writes ASCII, so its own dashes
+  are already hyphens, but you may have typed `--` or pasted a dash while
+  editing. Replace a dash standing in for punctuation with a comma, a colon, a
+  full stop, or parentheses, whichever the sentence needs, and rephrase if a
+  dash was papering over a weak join. Keep hyphens in genuine compounds
+  (`asset-based`, `private-equity-backed`) and number ranges (`50-75%`, `3-9`).
 - **Cut excessive bolding.** Bold is for table headers and at most the occasional
   genuinely key figure, not for emphasising whole phrases mid-sentence. Remove
-  inline `**…**` runs in prose; if a sentence only works because a phrase is
+  inline bold runs in prose; if a sentence only works because a phrase is
   bold, rewrite the sentence. Section headings already stand out, so do not bold
   text inside them.
-- **Drop other LLM hallmarks:** no emoji, no “curly” decorative quotes where a
-  plain one will do, no “In conclusion / Overall / It's worth noting that”
+- **Drop other LLM hallmarks:** no emoji, no decorative curly quotes where a
+  plain one will do, no "In conclusion / Overall / It's worth noting that"
   filler, and no three-item parallel triads added for rhythm rather than fact.
+- **Re-assert plain ASCII.** As the very last step, run
+  `python -m companies_house_diligence.asciify "$D/brief.md"` so any non-ASCII
+  you introduced while editing (a pasted pound sign, a smart quote, an accented
+  name) is normalised. Money reads as `GBP` rather than a pound sign by design.
 - Then rebuild the `.docx` from the cleaned Markdown so both outputs match.
 
 The goal is plain, declarative prose a sales director would not clock as
 AI-generated. Do not change any figure, name, citation marker or caveat while
-doing this — it is a copy-edit, not a rewrite.
+doing this; it is a copy-edit, not a rewrite.
 
 ---
 
