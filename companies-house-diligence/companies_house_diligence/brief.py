@@ -20,6 +20,7 @@ Run the discovery CLI first so that <dir>/structure.json exists.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import argparse
 import subprocess
@@ -186,7 +187,7 @@ def _money_read(figs: dict) -> list[str]:
 
 def build_brief(outdir: Path, do_financials=True, do_risk=True,
                 download_accounts=False, cache_dir=".ch_cache") -> Path:
-    struct = json.loads((outdir / "structure.json").read_text())
+    struct = json.loads((outdir / "structure.json").read_text(encoding="utf-8"))
     g = nx.read_graphml(str(outdir / "structure.graphml"))
     attrs = _node_attrs_by_number(g)
     classifications = struct["classifications"]
@@ -583,27 +584,44 @@ def build_brief(outdir: Path, do_financials=True, do_risk=True,
     L.append("")
 
     brief_path = outdir / "brief.md"
-    brief_path.write_text("\n".join(L))
+    brief_path.write_text("\n".join(L), encoding="utf-8")
     return brief_path
 
 
 def build_docx(md_path: Path) -> Optional[Path]:
-    """Convert a profile Markdown file to .docx via the bundled docx-build tool.
+    """Convert a profile Markdown file to .docx via pandoc.
 
-    Delegates to `docx-build/build.sh` (the established pandoc pipeline shipped
-    alongside this package) so the Word styling matches that tool exactly.
-    Returns the .docx path on success, or None if pandoc/the script is missing
-    or the build fails; the Markdown profile remains the primary artefact.
+    Cross-platform: invokes ``pandoc`` directly (no shell / bash), using the
+    bundled reference document and lua filters in ``docx-build/`` so the Word
+    styling matches that tool. Returns the .docx path on success, or None when
+    pandoc is missing or the build fails -- the Markdown profile is always the
+    primary artefact and is produced regardless.
     """
     if not shutil.which("pandoc"):
         return None
-    script = Path(__file__).resolve().parent.parent / "docx-build" / "build.sh"
-    if not script.exists():
+    build_dir = Path(__file__).resolve().parent.parent / "docx-build"
+    reference = build_dir / "reference.docx"
+    if not reference.exists():
         return None
     out = md_path.with_suffix(".docx")
+    # filters are applied in order; resource-path lets pandoc find images
+    # relative to the source dir, the skill root and the build dir.
+    resource_path = os.pathsep.join(
+        [str(md_path.resolve().parent), str(build_dir.parent), str(build_dir)])
+    cmd = [
+        "pandoc",
+        "--from=markdown+lists_without_preceding_blankline",
+        f"--reference-doc={reference.name}",
+        "-o", str(out.resolve()),
+        f"--resource-path={resource_path}",
+    ]
+    for f in ("figure-img.lua", "table-width.lua", "titlepage.lua", "sections.lua"):
+        if (build_dir / f).exists():
+            cmd += [f"--lua-filter={f}"]
+    cmd.append(str(md_path.resolve()))
     try:
-        subprocess.run(["bash", str(script), str(md_path.resolve())],
-                       check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True,
+                       cwd=str(build_dir))
     except (subprocess.CalledProcessError, OSError):
         return None
     return out if out.exists() else None

@@ -36,7 +36,7 @@ def _load_key() -> str:
     for d in [here, *here.parents]:
         env = d / ".env"
         if env.exists():
-            for line in env.read_text().splitlines():
+            for line in env.read_text(encoding="utf-8").splitlines():
                 if line.startswith("COMPANIES_HOUSE_KEY="):
                     return line.split("=", 1)[1].strip()
     raise RuntimeError(
@@ -81,7 +81,7 @@ class CompaniesHouseClient:
         """GET a JSON resource. Returns parsed dict, or None on 404."""
         cache_path = self._cache_path(path, params) if use_cache else None
         if cache_path and cache_path.exists():
-            return json.loads(cache_path.read_text())
+            return json.loads(cache_path.read_text(encoding="utf-8"))
 
         url = base + path
         for attempt in range(self.max_retries):
@@ -90,7 +90,7 @@ class CompaniesHouseClient:
             if resp.status_code == 200:
                 data = resp.json()
                 if cache_path:
-                    cache_path.write_text(json.dumps(data))
+                    cache_path.write_text(json.dumps(data), encoding="utf-8")
                 return data
             if resp.status_code == 404:
                 return None

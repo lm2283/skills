@@ -55,7 +55,7 @@ def main(argv=None):
     # ---- Phase 1: identifiers --------------------------------------------
     ids = Identifiers(url=args.number or "")
     if args.url or args.html:
-        htmltext = Path(args.html).read_text(errors="ignore") if args.html else None
+        htmltext = Path(args.html).read_text(encoding="utf-8", errors="ignore") if args.html else None
         ids = extract_site(args.url or "(local html)", htmltext,
                            follow=args.follow, max_pages=args.max_pages)
         print(f"[1] identifiers: numbers={ids.company_numbers} vat={ids.vat_numbers} "
@@ -78,7 +78,8 @@ def main(argv=None):
                   (prof.get("company_name") or "").lower()).strip("-")[:50]
     out = root / f"{anchor_num}_{slug}"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "identifiers.json").write_text(json.dumps(ids.to_dict(), indent=2))
+    (out / "identifiers.json").write_text(json.dumps(ids.to_dict(), indent=2),
+                                          encoding="utf-8")
     print(f"[2] anchor: {anchor_num} {prof.get('company_name')} "
           f"(method={method}, confidence={conf})")
     print(f"    output dir: {out}")
@@ -127,7 +128,7 @@ def main(argv=None):
         "classifications": [r.__dict__ for r in results],
         "api_calls": client.call_count,
     }
-    (out / "structure.json").write_text(json.dumps(dump, indent=2))
+    (out / "structure.json").write_text(json.dumps(dump, indent=2), encoding="utf-8")
     print(f"[5] wrote {out}/structure.graphml and structure.json "
           f"({client.call_count} API calls)")
     return 0

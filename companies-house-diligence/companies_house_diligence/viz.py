@@ -297,7 +297,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     g = nx.read_graphml(args.graphml)
-    data = json.loads(open(args.classes).read())
+    data = json.loads(open(args.classes, encoding="utf-8").read())
     label = {c["company_number"]: c["label"] for c in data["classifications"]}
 
     if args.mode == "confirmed":
